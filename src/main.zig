@@ -12,17 +12,45 @@ const Config = struct {
 
 const Transformer = struct {
     config: Config,
+    fd: std.os.fd_t,
 };
 
 fn transformerInit(checkpoint_path: []const u8) !Transformer {
-    const file = try std.fs.cwd().openFile(checkpoint_path, .{});
-    defer file.close();
-
+    var file_size: u64 = 0;
+    var shared_weights: bool = false;
     var config: Config = undefined;
-    const config_slice = std.mem.asBytes(&config);
-    _ = try file.read(config_slice);
+    {
+        const file = try std.fs.cwd().openFile(checkpoint_path, .{});
+        defer file.close();
 
-    return .{ .config = config };
+        // Read in the config header
+        const config_slice = std.mem.asBytes(&config);
+        _ = try file.read(config_slice);
+        // Negative vocab size is hacky way of signaling unshared weights. Bit yikes.
+        shared_weights = config.vocab_size > 0;
+        config.vocab_size = try std.math.absInt(config.vocab_size);
+        // Figure out the file size
+        file_size = try file.getEndPos();
+    }
+    // Memory map the Transformer weights into the data pointer
+    var fd: std.os.fd_t = undefined;
+    {
+        fd = try std.os.open(checkpoint_path, 0, 0);
+        // TODO: This relies on Linux-specific mmap flags. Need to make this portable.
+        const data = try std.os.mmap(null, file_size, std.os.linux.PROT.READ, std.os.linux.MAP.PRIVATE, fd, 0);
+        _ = data;
+    }
+
+    return .{
+        .config = config,
+        .fd = fd,
+    };
+}
+
+fn transformerFree(transformer: Transformer) void {
+    _ = std.os.close(transformer.fd);
+    // TODO: Unamp the memory
+    // std.os.munmap(data);
 }
 
 fn errorUsage() !void {
@@ -61,5 +89,5 @@ pub fn main() !void {
     // TODO: more command line argument validation
 
     const transformer = try transformerInit(checkpoint_path.?);
-    _ = transformer;
+    transformerFree(transformer);
 }
