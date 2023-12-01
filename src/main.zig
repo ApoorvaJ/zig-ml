@@ -27,8 +27,25 @@ const Weights = struct {
     w3: []align(1) const f32, // (layer, hidden_dim, dim)
     // Final rmsnorm
     rms_final_weight: []align(1) const f32, // (dim,)
-    // (optional) classifier weights for the logits, on the last layer
+    // (Optional) classifier weights for the logits, on the last layer
     wcls: []align(1) const f32,
+};
+
+const RunState = struct {
+    // Current wave of activations
+    x: []f32, // activation at current time stamp (dim,)
+    xb: []f32, // same, but inside a residual branch (dim,)
+    xb2: []f32, // an additional buffer just for convenience (dim,)
+    hb: []f32, // buffer for hidden dimension in the ffn (hidden_dim,)
+    hb2: []f32, // buffer for hidden dimension in the ffn (hidden_dim,)
+    q: []f32, // query (dim,)
+    k: []f32, // key (dim,)
+    v: []f32, // value (dim,)
+    att: []f32, // buffer for scores/attention values (n_heads, seq_len)
+    logits: []f32, // output logits
+    // Key-value cache
+    key_cache: []f32, // (layer, seq_len, dim)
+    value_cache: []f32, // (layer, seq_len, dim)
 };
 
 const Transformer = struct {
@@ -36,6 +53,7 @@ const Transformer = struct {
     fd: std.os.fd_t,
     mapped_buffer: []align(std.mem.page_size) const u8,
     weights: Weights,
+    run_state: RunState,
 };
 
 /// This function returns a slice of f32s from the source u8 slice. It also increments the start
@@ -51,7 +69,7 @@ fn slice_and_increment(
     return out_slice;
 }
 
-fn transformerInit(checkpoint_path: []const u8) !Transformer {
+fn transformerInit(checkpoint_path: []const u8, allocator: std.mem.Allocator) !Transformer {
     var file_size: u64 = 0;
     var shared_weights: bool = false;
     var config: Config = undefined;
@@ -76,18 +94,20 @@ fn transformerInit(checkpoint_path: []const u8) !Transformer {
         // TODO: This relies on Linux-specific mmap flags. Need to make this portable.
         mapped_buffer = try std.os.mmap(null, file_size, std.os.linux.PROT.READ, std.os.linux.MAP.PRIVATE, fd, 0);
     }
+
+    const n_layers: usize = @intCast(config.n_layers);
+    const dim: usize = @intCast(config.dim);
+    const hidden_dim: usize = @intCast(config.hidden_dim);
+    const vocab_size: usize = @intCast(config.vocab_size);
+    const n_heads: usize = @intCast(config.n_heads);
+    const n_kv_heads: usize = @intCast(config.n_kv_heads);
+    const seq_len: usize = @intCast(config.seq_len);
+
     // Obtain slices into the mapped buffer for each of the weights
     var weights: Weights = undefined;
     {
         std.debug.assert(config.dim > 0 and config.n_heads > 0 and config.n_layers > 0 and config.vocab_size > 0 and config.n_heads > 0);
-        const n_layers: usize = @intCast(config.n_layers);
-        const dim: usize = @intCast(config.dim);
-        const hidden_dim: usize = @intCast(config.hidden_dim);
-        const vocab_size: usize = @intCast(config.vocab_size);
-        const n_heads: usize = @intCast(config.n_heads);
-        const n_kv_heads: usize = @intCast(config.n_kv_heads);
-        const seq_len: usize = @intCast(config.seq_len);
-        const head_size: usize = @divTrunc(dim, n_heads);
+        const head_size: usize = dim / n_heads;
 
         var start: usize = @sizeOf(Config);
         weights.token_embedding_table = slice_and_increment(mapped_buffer, &start, vocab_size * dim);
@@ -109,18 +129,45 @@ fn transformerInit(checkpoint_path: []const u8) !Transformer {
             weights.wcls = slice_and_increment(mapped_buffer, &start, vocab_size * dim);
         }
     }
+    // Heap-allocate the run state
+    var run_state: RunState = undefined;
+    {
+        const kv_dim: usize = (dim * n_kv_heads) / n_heads;
+
+        run_state.x = try allocator.alloc(f32, dim);
+        run_state.xb = try allocator.alloc(f32, dim);
+        run_state.xb2 = try allocator.alloc(f32, dim);
+        run_state.hb = try allocator.alloc(f32, hidden_dim);
+        run_state.hb2 = try allocator.alloc(f32, hidden_dim);
+        run_state.q = try allocator.alloc(f32, dim);
+        run_state.key_cache = try allocator.alloc(f32, n_layers * seq_len * kv_dim);
+        run_state.value_cache = try allocator.alloc(f32, n_layers * seq_len * kv_dim);
+        run_state.att = try allocator.alloc(f32, n_heads * seq_len);
+        run_state.logits = try allocator.alloc(f32, vocab_size);
+    }
 
     return .{
         .config = config,
         .fd = fd,
         .mapped_buffer = mapped_buffer,
         .weights = weights,
+        .run_state = run_state,
     };
 }
 
-fn transformerFree(transformer: Transformer) void {
+fn transformerFree(transformer: Transformer, allocator: std.mem.Allocator) void {
     std.os.close(transformer.fd);
     std.os.munmap(transformer.mapped_buffer);
+    allocator.free(transformer.run_state.x);
+    allocator.free(transformer.run_state.xb);
+    allocator.free(transformer.run_state.xb2);
+    allocator.free(transformer.run_state.hb);
+    allocator.free(transformer.run_state.hb2);
+    allocator.free(transformer.run_state.q);
+    allocator.free(transformer.run_state.key_cache);
+    allocator.free(transformer.run_state.value_cache);
+    allocator.free(transformer.run_state.att);
+    allocator.free(transformer.run_state.logits);
 }
 
 fn errorUsage() !void {
@@ -158,6 +205,6 @@ pub fn main() !void {
 
     // TODO: more command line argument validation
 
-    const transformer = try transformerInit(checkpoint_path.?);
-    defer transformerFree(transformer);
+    const transformer = try transformerInit(checkpoint_path.?, gpa);
+    defer transformerFree(transformer, gpa);
 }
