@@ -1,5 +1,6 @@
 const std = @import("std");
 const Transformer = @import("Transformer.zig");
+const Tokenizer = @import("Tokenizer.zig");
 
 fn errorUsage() !void {
     const stderr = std.io.getStdErr().writer();
@@ -37,5 +38,7 @@ pub fn main() !void {
     // TODO: more command line argument validation
 
     const transformer = try Transformer.init(checkpoint_path.?, gpa);
-    defer Transformer.free(transformer, gpa);
+    defer transformer.free(gpa);
+    const tokenizer = try Tokenizer.init("tokenizer.bin", gpa, @intCast(transformer.config.vocab_size));
+    defer tokenizer.free(gpa);
 }

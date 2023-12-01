@@ -153,17 +153,17 @@ pub fn init(checkpoint_path: []const u8, allocator: std.mem.Allocator) !@This() 
     };
 }
 
-pub fn free(transformer: @This(), allocator: std.mem.Allocator) void {
-    std.os.close(transformer.fd);
-    std.os.munmap(transformer.mapped_buffer);
-    allocator.free(transformer.run_state.x);
-    allocator.free(transformer.run_state.xb);
-    allocator.free(transformer.run_state.xb2);
-    allocator.free(transformer.run_state.hb);
-    allocator.free(transformer.run_state.hb2);
-    allocator.free(transformer.run_state.q);
-    allocator.free(transformer.run_state.key_cache);
-    allocator.free(transformer.run_state.value_cache);
-    allocator.free(transformer.run_state.att);
-    allocator.free(transformer.run_state.logits);
+pub fn free(self: @This(), allocator: std.mem.Allocator) void {
+    std.os.close(self.fd);
+    std.os.munmap(self.mapped_buffer);
+    allocator.free(self.run_state.x);
+    allocator.free(self.run_state.xb);
+    allocator.free(self.run_state.xb2);
+    allocator.free(self.run_state.hb);
+    allocator.free(self.run_state.hb2);
+    allocator.free(self.run_state.q);
+    allocator.free(self.run_state.key_cache);
+    allocator.free(self.run_state.value_cache);
+    allocator.free(self.run_state.att);
+    allocator.free(self.run_state.logits);
 }
