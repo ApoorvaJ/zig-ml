@@ -1,6 +1,7 @@
 const std = @import("std");
 const Transformer = @import("Transformer.zig");
 const Tokenizer = @import("Tokenizer.zig");
+const Sampler = @import("Sampler.zig");
 
 fn errorUsage() !void {
     const stderr = std.io.getStdErr().writer();
@@ -41,4 +42,6 @@ pub fn main() !void {
     defer transformer.free(gpa);
     const tokenizer = try Tokenizer.init("tokenizer.bin", gpa, @intCast(transformer.config.vocab_size));
     defer tokenizer.free(gpa);
+    const sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), 1.0, 0.9, 0);
+    defer sampler.free(gpa);
 }
