@@ -71,6 +71,7 @@ pub fn init(checkpoint_path: []const u8, allocator: std.mem.Allocator) !@This() 
     var file_size: u64 = 0;
     var shared_weights: bool = false;
     var config: Config = undefined;
+    // Read the config from the file
     {
         const file = try std.fs.cwd().openFile(checkpoint_path, .{});
         defer file.close();
