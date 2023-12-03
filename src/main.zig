@@ -21,6 +21,24 @@ fn errorUsage() !void {
     try stderr.print(usage, .{});
 }
 
+fn generate(
+    transformer: Transformer,
+    tokenizer: Tokenizer,
+    sampler: Sampler,
+    prompt: [:0]const u8,
+    step: i32,
+    allocator: std.mem.Allocator,
+) !void {
+    _ = step;
+    _ = sampler;
+    _ = transformer;
+    // encode the (string) prompt into tokens sequence
+    var prompt_tokens = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
+    defer allocator.free(prompt_tokens);
+
+    tokenizer.encode(prompt, prompt_tokens);
+}
+
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const gpa = general_purpose_allocator.allocator();
@@ -44,4 +62,6 @@ pub fn main() !void {
     defer tokenizer.free(gpa);
     const sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), 1.0, 0.9, 0);
     defer sampler.free(gpa);
+
+    try generate(transformer, tokenizer, sampler, "Once upon a time", 256, gpa);
 }
