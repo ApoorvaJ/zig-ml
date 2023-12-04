@@ -36,7 +36,7 @@ fn generate(
     var prompt_tokens = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
     defer allocator.free(prompt_tokens);
 
-    tokenizer.encode(prompt, prompt_tokens);
+    _ = try tokenizer.encode(prompt, prompt_tokens, allocator);
 }
 
 pub fn main() !void {

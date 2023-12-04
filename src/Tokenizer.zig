@@ -14,7 +14,7 @@ byte_pieces: [512]u8, // stores all single-byte strings
 max_token_length: i32,
 
 fn compareTokenIndex(_: void, a: TokenIndex, b: TokenIndex) bool {
-    return std.mem.order(u8, a.str, b.str).compare(std.math.CompareOperator.lt);
+    return std.mem.orderZ(u8, a.str, b.str).compare(std.math.CompareOperator.lt);
 }
 
 pub fn init(tokenizer_path: []const u8, allocator: std.mem.Allocator, vocab_size: usize) !@This() {
@@ -87,15 +87,33 @@ pub fn free(self: @This(), allocator: std.mem.Allocator) void {
     allocator.free(self.sorted_vocab);
 }
 
-pub fn encode(self: @This(), text: [:0]const u8, out_tokens: []u32) void {
+/// Encode the string text (input) into an upper-bound preallocated out_tokens[]
+/// array.
+pub fn encode(
+    self: @This(),
+    text: [:0]const u8,
+    out_tokens: []u32,
+    allocator: std.mem.Allocator,
+) !usize {
+    // bos != 0 means prepend the BOS token (=1), eos != 0 means append the EOS token (=2)
     const prepend_bos_token: bool = true;
     const append_eos_token: bool = false;
     _ = text;
-    _ = out_tokens;
-    _ = self;
-    _ = prepend_bos_token;
     _ = append_eos_token;
-    // Encode the string text (input) into an upper-bound preallocated out_tokens[] array.
-    // bos != 0 means prepend the BOS token (=1), eos != 0 means append the EOS token (=2)
 
+    // Create a temporary buffer that will store merge candidates of always two consecutive tokens
+    // *2 for concat, +1 for null terminator +2 for UTF8 (in case max_token_length is 1)
+    const max_len: usize = @intCast(self.max_token_length);
+    var str_buffer = try allocator.alloc(u8, max_len * 2 + 1 + 2);
+    defer allocator.free(str_buffer);
+
+    var n_tokens: usize = 0;
+
+    // add optional BOS (=1) token, if desired
+    if (prepend_bos_token) {
+        out_tokens[0] = 1;
+        n_tokens += 1;
+    }
+
+    return n_tokens;
 }
