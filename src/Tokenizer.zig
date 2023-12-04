@@ -13,8 +13,12 @@ sorted_vocab: []TokenIndex,
 byte_pieces: [512]u8, // stores all single-byte strings
 max_token_length: i32,
 
-fn compareTokenIndex(_: void, a: TokenIndex, b: TokenIndex) bool {
+fn sortToken(_: void, a: TokenIndex, b: TokenIndex) bool {
     return std.mem.orderZ(u8, a.str, b.str).compare(std.math.CompareOperator.lt);
+}
+// fn(context:@TypeOf(context), key:@TypeOf(key), mid_item:T)math.Order
+fn compareToken(_: void, key: [:0]const u8, mid_item: TokenIndex) std.math.Order {
+    return std.mem.orderZ(u8, key, mid_item.str);
 }
 
 pub fn init(tokenizer_path: []const u8, allocator: std.mem.Allocator, vocab_size: usize) !@This() {
@@ -67,7 +71,7 @@ pub fn init(tokenizer_path: []const u8, allocator: std.mem.Allocator, vocab_size
         sorted_vocab[i].id = @intCast(i);
     }
     // Sort sorted_vocab by the string value of each token, using the Zig standard library.
-    std.sort.pdq(TokenIndex, sorted_vocab, {}, compareTokenIndex);
+    std.sort.pdq(TokenIndex, sorted_vocab, {}, sortToken);
 
     return .{
         .vocab = vocab,
@@ -111,7 +115,18 @@ pub fn encode(
 
     // add optional BOS (=1) token, if desired
     if (prepend_bos_token) {
-        out_tokens[0] = 1;
+        out_tokens[n_tokens] = 1;
+        n_tokens += 1;
+    }
+
+    // Add the dummy prefix token
+    {
+        // TODO: This binary search takes a significant amount of time. It can be avoided by pre-storing
+        // the index of this token.
+        const key: [:0]const u8 = " ";
+        const opt_dummy_prefix: ?usize = std.sort.binarySearch(TokenIndex, key, self.sorted_vocab, {}, compareToken);
+        std.debug.assert(opt_dummy_prefix != null);
+        out_tokens[n_tokens] = opt_dummy_prefix.*;
         n_tokens += 1;
     }
 
