@@ -25,7 +25,7 @@ fn generate(
     transformer: Transformer,
     tokenizer: Tokenizer,
     sampler: Sampler,
-    prompt: [:0]const u8,
+    prompt: []const u8,
     step: i32,
     allocator: std.mem.Allocator,
 ) !void {
