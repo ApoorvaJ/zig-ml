@@ -168,3 +168,37 @@ pub fn free(self: @This(), allocator: std.mem.Allocator) void {
     allocator.free(self.run_state.att);
     allocator.free(self.run_state.logits);
 }
+
+fn rmsnorm(o: []f32, x: []f32, weight: []align(1) const f32) void {
+    std.debug.assert(o.len == x.len and x.len == weight.len);
+    // Calculate sum of squares
+    var ss: f32 = 0.0;
+    for (0..x.len) |i| {
+        ss += x[i] * x[i];
+    }
+    ss /= @floatFromInt(x.len);
+    ss += 1e-5;
+    ss = 1.0 / @sqrt(ss);
+    // normalize and scale
+    for (0..x.len) |i| {
+        o[i] = weight[i] * (ss * x[i]);
+    }
+}
+
+pub fn forward(self: @This(), token: u32, pos: u32) []f32 {
+    _ = pos;
+
+    const dim: usize = @intCast(self.config.dim);
+    const n_layers: usize = @intCast(self.config.n_layers);
+
+    // Copy the token embedding into x
+    @memcpy(self.run_state.x, self.weights.token_embedding_table[token * dim .. token * dim + dim]);
+
+    // Forward all the layers
+    for (0..n_layers) |l| {
+        // attention rmsnorm
+        rmsnorm(self.run_state.xb, self.run_state.x, self.weights.rms_att_weight[l * dim .. l * dim + dim]);
+    }
+
+    return &.{};
+}

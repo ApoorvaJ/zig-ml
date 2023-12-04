@@ -26,17 +26,27 @@ fn generate(
     tokenizer: Tokenizer,
     sampler: Sampler,
     prompt: []const u8,
-    step: i32,
+    steps: u32,
     allocator: std.mem.Allocator,
 ) !void {
-    _ = step;
     _ = sampler;
-    _ = transformer;
     // encode the (string) prompt into tokens sequence
-    var prompt_tokens = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
-    defer allocator.free(prompt_tokens);
+    var prompt_token_buffer = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
+    defer allocator.free(prompt_token_buffer);
 
-    _ = try tokenizer.encode(prompt, prompt_tokens, allocator);
+    var num_prompt_tokens = try tokenizer.encode(prompt, prompt_token_buffer, allocator);
+    const prompt_tokens: []u32 = prompt_token_buffer[0..num_prompt_tokens];
+    std.debug.assert(num_prompt_tokens >= 1);
+
+    // Start the main loop
+    var pos: u32 = 0;
+    var token: u32 = prompt_tokens[0];
+    while (pos < steps) {
+        // Forward the transformer to get logits for the next token.
+        var logits = transformer.forward(token, pos);
+        _ = logits;
+        break; //temp
+    }
 }
 
 pub fn main() !void {
