@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const MappedFile = @import("MappedFile.zig");
 
 const Config = struct {
     dim: i32, // transformer dimension
@@ -49,10 +51,9 @@ const RunState = struct {
 };
 
 config: Config,
-fd: std.os.fd_t,
-mapped_buffer: []align(std.mem.page_size) const u8,
 weights: Weights,
 run_state: RunState,
+mapped_file: MappedFile,
 
 /// This function returns a slice of f32s from the source u8 slice. It also increments the start
 /// address.
@@ -86,13 +87,7 @@ pub fn init(checkpoint_path: []const u8, allocator: std.mem.Allocator) !@This() 
         file_size = try file.getEndPos();
     }
     // Memory map the Transformer weights into the data pointer
-    var fd: std.os.fd_t = undefined;
-    var mapped_buffer: []align(std.mem.page_size) const u8 = undefined;
-    {
-        fd = try std.os.open(checkpoint_path, 0, 0);
-        // TODO: This relies on Linux-specific mmap flags. Need to make this portable.
-        mapped_buffer = try std.os.mmap(null, file_size, std.os.linux.PROT.READ, std.os.linux.MAP.PRIVATE, fd, 0);
-    }
+    var mapped_file = try MappedFile.init(checkpoint_path, .{ .mode = .read_only });
 
     const n_layers: usize = @intCast(config.n_layers);
     const dim: usize = @intCast(config.dim);
@@ -109,23 +104,23 @@ pub fn init(checkpoint_path: []const u8, allocator: std.mem.Allocator) !@This() 
         const head_size: usize = dim / n_heads;
 
         var start: usize = @sizeOf(Config);
-        weights.token_embedding_table = slice_and_increment(mapped_buffer, &start, vocab_size * dim);
-        weights.rms_att_weight = slice_and_increment(mapped_buffer, &start, n_layers * dim);
-        weights.wq = slice_and_increment(mapped_buffer, &start, n_layers * dim * (n_heads * head_size));
-        weights.wk = slice_and_increment(mapped_buffer, &start, n_layers * dim * (n_kv_heads * head_size));
-        weights.wv = slice_and_increment(mapped_buffer, &start, n_layers * dim * (n_kv_heads * head_size));
-        weights.wo = slice_and_increment(mapped_buffer, &start, n_layers * dim * (n_heads * head_size));
-        weights.rms_ffn_weight = slice_and_increment(mapped_buffer, &start, n_layers * dim);
-        weights.w1 = slice_and_increment(mapped_buffer, &start, n_layers * dim * hidden_dim);
-        weights.w2 = slice_and_increment(mapped_buffer, &start, n_layers * dim * hidden_dim);
-        weights.w3 = slice_and_increment(mapped_buffer, &start, n_layers * dim * hidden_dim);
-        weights.rms_final_weight = slice_and_increment(mapped_buffer, &start, dim);
+        weights.token_embedding_table = slice_and_increment(mapped_file.mem, &start, vocab_size * dim);
+        weights.rms_att_weight = slice_and_increment(mapped_file.mem, &start, n_layers * dim);
+        weights.wq = slice_and_increment(mapped_file.mem, &start, n_layers * dim * (n_heads * head_size));
+        weights.wk = slice_and_increment(mapped_file.mem, &start, n_layers * dim * (n_kv_heads * head_size));
+        weights.wv = slice_and_increment(mapped_file.mem, &start, n_layers * dim * (n_kv_heads * head_size));
+        weights.wo = slice_and_increment(mapped_file.mem, &start, n_layers * dim * (n_heads * head_size));
+        weights.rms_ffn_weight = slice_and_increment(mapped_file.mem, &start, n_layers * dim);
+        weights.w1 = slice_and_increment(mapped_file.mem, &start, n_layers * dim * hidden_dim);
+        weights.w2 = slice_and_increment(mapped_file.mem, &start, n_layers * dim * hidden_dim);
+        weights.w3 = slice_and_increment(mapped_file.mem, &start, n_layers * dim * hidden_dim);
+        weights.rms_final_weight = slice_and_increment(mapped_file.mem, &start, dim);
         if (shared_weights) {
             weights.wcls = weights.token_embedding_table;
         } else {
             start += seq_len * head_size / 2; // skip what used to be freq_cis_real (for RoPE)
             start += seq_len * head_size / 2; // skip what used to be freq_cis_imag (for RoPE)
-            weights.wcls = slice_and_increment(mapped_buffer, &start, vocab_size * dim);
+            weights.wcls = slice_and_increment(mapped_file.mem, &start, vocab_size * dim);
         }
     }
     // Heap-allocate the run state
@@ -147,16 +142,13 @@ pub fn init(checkpoint_path: []const u8, allocator: std.mem.Allocator) !@This() 
 
     return .{
         .config = config,
-        .fd = fd,
-        .mapped_buffer = mapped_buffer,
         .weights = weights,
         .run_state = run_state,
+        .mapped_file = mapped_file,
     };
 }
 
 pub fn free(self: @This(), allocator: std.mem.Allocator) void {
-    std.os.close(self.fd);
-    std.os.munmap(self.mapped_buffer);
     allocator.free(self.run_state.x);
     allocator.free(self.run_state.xb);
     allocator.free(self.run_state.xb2);
@@ -167,6 +159,7 @@ pub fn free(self: @This(), allocator: std.mem.Allocator) void {
     allocator.free(self.run_state.value_cache);
     allocator.free(self.run_state.att);
     allocator.free(self.run_state.logits);
+    self.mapped_file.unmap();
 }
 
 fn rmsnorm(o: []f32, x: []f32, weight: []align(1) const f32) void {
@@ -187,12 +180,14 @@ fn rmsnorm(o: []f32, x: []f32, weight: []align(1) const f32) void {
 
 pub fn forward(self: @This(), token: u32, pos: u32) []f32 {
     _ = pos;
-
     const dim: usize = @intCast(self.config.dim);
     const n_layers: usize = @intCast(self.config.n_layers);
+    const n_heads: usize = @intCast(self.config.n_heads);
     const n_kv_heads: usize = @intCast(self.config.n_kv_heads);
     const seq_len: usize = @intCast(self.config.seq_len);
+    _ = seq_len;
     const kv_dim: usize = (dim * n_kv_heads) / n_heads;
+    _ = kv_dim;
 
     // Copy the token embedding into x
     @memcpy(self.run_state.x, self.weights.token_embedding_table[token * dim .. token * dim + dim]);
@@ -202,8 +197,8 @@ pub fn forward(self: @This(), token: u32, pos: u32) []f32 {
         // Attention rmsnorm
         rmsnorm(self.run_state.xb, self.run_state.x, self.weights.rms_att_weight[l * dim .. l * dim + dim]);
         // Key and value point to the kv cache
-        const loff: usize = l * seq_len * kv_dim;
-        self.run_state.k = self.run_state.key_cache[loff + pos * kv_dim .. loff + pos * kv_dim + dim];
+        // const loff: usize = l * seq_len * kv_dim;
+        // self.run_state.k = self.run_state.key_cache[loff + pos * kv_dim .. loff + pos * kv_dim + dim];
     }
 
     return &.{};
