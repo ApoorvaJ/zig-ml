@@ -41,8 +41,8 @@ const RunState = struct {
     hb: []f32, // buffer for hidden dimension in the ffn (hidden_dim,)
     hb2: []f32, // buffer for hidden dimension in the ffn (hidden_dim,)
     q: []f32, // query (dim,)
-    k: []f32, // key (dim,)
-    v: []f32, // value (dim,)
+    k: []f32, // key (kv_dim,)
+    v: []f32, // value (kv_dim,)
     att: []f32, // buffer for scores/attention values (n_heads, seq_len)
     logits: []f32, // output logits
     // Key-value cache
@@ -162,7 +162,7 @@ pub fn free(self: @This(), allocator: std.mem.Allocator) void {
     self.mapped_file.unmap();
 }
 
-fn rmsnorm(o: []f32, x: []f32, weight: []align(1) const f32) void {
+fn rmsnorm(o: []f32, x: []const f32, weight: []align(1) const f32) void {
     std.debug.assert(o.len == x.len and x.len == weight.len);
     // Calculate sum of squares
     var ss: f32 = 0.0;
@@ -178,16 +178,28 @@ fn rmsnorm(o: []f32, x: []f32, weight: []align(1) const f32) void {
     }
 }
 
-pub fn forward(self: @This(), token: u32, pos: u32) []f32 {
-    _ = pos;
+fn matmul(xout: []f32, x: []const f32, w: []align(1) const f32) void {
+    // W (d,n) @ x (n,) -> xout (d,)
+    const d = xout.len;
+    const n = x.len;
+    std.debug.assert(w.len == d * n);
+
+    for (0..d) |i| {
+        var val: f32 = 0.0;
+        for (0..n) |j| {
+            val += w[i * n + j] * x[j];
+        }
+        xout[i] = val;
+    }
+}
+
+pub fn forward(self: *@This(), token: u32, pos: u32) []f32 {
     const dim: usize = @intCast(self.config.dim);
     const n_layers: usize = @intCast(self.config.n_layers);
     const n_heads: usize = @intCast(self.config.n_heads);
     const n_kv_heads: usize = @intCast(self.config.n_kv_heads);
     const seq_len: usize = @intCast(self.config.seq_len);
-    _ = seq_len;
     const kv_dim: usize = (dim * n_kv_heads) / n_heads;
-    _ = kv_dim;
 
     // Copy the token embedding into x
     @memcpy(self.run_state.x, self.weights.token_embedding_table[token * dim .. token * dim + dim]);
@@ -197,8 +209,13 @@ pub fn forward(self: @This(), token: u32, pos: u32) []f32 {
         // Attention rmsnorm
         rmsnorm(self.run_state.xb, self.run_state.x, self.weights.rms_att_weight[l * dim .. l * dim + dim]);
         // Key and value point to the kv cache
-        // const loff: usize = l * seq_len * kv_dim;
-        // self.run_state.k = self.run_state.key_cache[loff + pos * kv_dim .. loff + pos * kv_dim + dim];
+        const loff: usize = l * seq_len * kv_dim;
+        self.run_state.k = self.run_state.key_cache[loff + pos * kv_dim .. loff + pos * kv_dim + kv_dim];
+        self.run_state.v = self.run_state.value_cache[loff + pos * kv_dim .. loff + pos * kv_dim + kv_dim];
+        // qkv matmuls for this position
+        matmul(self.run_state.q, self.run_state.xb, self.weights.wq[l * dim * dim .. l * dim * dim + (dim * dim)]);
+        matmul(self.run_state.k, self.run_state.xb, self.weights.wk[l * dim * kv_dim .. l * dim * kv_dim + (dim * kv_dim)]);
+        matmul(self.run_state.v, self.run_state.xb, self.weights.wv[l * dim * kv_dim .. l * dim * kv_dim + (dim * kv_dim)]);
     }
 
     return &.{};

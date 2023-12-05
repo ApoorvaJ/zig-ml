@@ -22,7 +22,7 @@ fn errorUsage() !void {
 }
 
 fn generate(
-    transformer: Transformer,
+    transformer: *Transformer,
     tokenizer: Tokenizer,
     sampler: Sampler,
     prompt: []const u8,
@@ -66,12 +66,12 @@ pub fn main() !void {
 
     // TODO: more command line argument validation
 
-    const transformer = try Transformer.init(checkpoint_path.?, gpa);
+    var transformer = try Transformer.init(checkpoint_path.?, gpa);
     defer transformer.free(gpa);
     const tokenizer = try Tokenizer.init("tokenizer.bin", gpa, @intCast(transformer.config.vocab_size));
     defer tokenizer.free(gpa);
     const sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), 1.0, 0.9, 0);
     defer sampler.free(gpa);
 
-    try generate(transformer, tokenizer, sampler, "Once upon a time", 256, gpa);
+    try generate(&transformer, tokenizer, sampler, "Once upon a time", 256, gpa);
 }
