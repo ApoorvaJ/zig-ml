@@ -190,14 +190,20 @@ pub fn forward(self: @This(), token: u32, pos: u32) []f32 {
 
     const dim: usize = @intCast(self.config.dim);
     const n_layers: usize = @intCast(self.config.n_layers);
+    const n_kv_heads: usize = @intCast(self.config.n_kv_heads);
+    const seq_len: usize = @intCast(self.config.seq_len);
+    const kv_dim: usize = (dim * n_kv_heads) / n_heads;
 
     // Copy the token embedding into x
     @memcpy(self.run_state.x, self.weights.token_embedding_table[token * dim .. token * dim + dim]);
 
     // Forward all the layers
     for (0..n_layers) |l| {
-        // attention rmsnorm
+        // Attention rmsnorm
         rmsnorm(self.run_state.xb, self.run_state.x, self.weights.rms_att_weight[l * dim .. l * dim + dim]);
+        // Key and value point to the kv cache
+        const loff: usize = l * seq_len * kv_dim;
+        self.run_state.k = self.run_state.key_cache[loff + pos * kv_dim .. loff + pos * kv_dim + dim];
     }
 
     return &.{};
