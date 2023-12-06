@@ -321,8 +321,29 @@ pub fn forward(self: *@This(), token: u32, pos: u32) []f32 {
         matmul(self.run_state.hb2, self.run_state.xb, self.weights.w3[l * dim * hidden_dim .. (l + 1) * dim * hidden_dim]);
 
         // SwiGLU non-linearity
+        for (0..hidden_dim) |j| {
+            var val: f32 = self.run_state.hb[j];
+            // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+            val *= (1.0 / (1.0 + @exp(-val)));
+            // elementwise multiply with w3(x)
+            val *= self.run_state.hb2[j];
+            self.run_state.hb[j] = val;
+        }
 
+        // Final matmul to get the output of the ffn
+        matmul(self.run_state.xb, self.run_state.hb, self.weights.w2[l * dim * hidden_dim .. (l + 1) * dim * hidden_dim]);
+
+        // Residual connection
+        for (0..dim) |j| {
+            self.run_state.x[j] += self.run_state.xb[j];
+        }
     }
 
-    return &.{};
+    // Final rmsnorm
+    // TODO: The first two slices here alias. Need to make sure this is okay.
+    rmsnorm(self.run_state.x, self.run_state.x, self.weights.rms_final_weight);
+
+    // classifier into logits
+    matmul(self.run_state.logits, self.run_state.x, self.weights.wcls);
+    return self.run_state.logits;
 }

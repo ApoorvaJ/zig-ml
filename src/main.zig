@@ -44,7 +44,7 @@ fn generate(
     while (pos < steps) {
         // Forward the transformer to get logits for the next token.
         var logits = transformer.forward(token, pos);
-        _ = logits;
+        std.debug.print("{any}\n", .{logits});
         break; //temp
     }
 }
