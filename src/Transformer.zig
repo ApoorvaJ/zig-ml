@@ -178,6 +178,27 @@ fn rmsnorm(o: []f32, x: []const f32, weight: []align(1) const f32) void {
     }
 }
 
+/// x is both the input and the output
+fn softmax(x: []f32) void {
+    // find max value (for numerical stability)
+    var max_val: f32 = x[0];
+    for (1..x.len) |i| {
+        if (x[i] > max_val) {
+            max_val = x[i];
+        }
+    }
+    // exp and sum
+    var sum: f32 = 0.0;
+    for (0..x.len) |i| {
+        x[i] = @exp(x[i] - max_val);
+        sum += x[i];
+    }
+    // normalize
+    for (0..x.len) |i| {
+        x[i] /= sum;
+    }
+}
+
 fn matmul(xout: []f32, x: []const f32, w: []align(1) const f32) void {
     // W (d,n) @ x (n,) -> xout (d,)
     const d = xout.len;
@@ -194,12 +215,16 @@ fn matmul(xout: []f32, x: []const f32, w: []align(1) const f32) void {
 }
 
 pub fn forward(self: *@This(), token: u32, pos: u32) []f32 {
+    std.debug.assert(self.config.seq_len > pos);
+
     const dim: usize = @intCast(self.config.dim);
     const n_layers: usize = @intCast(self.config.n_layers);
     const n_heads: usize = @intCast(self.config.n_heads);
     const n_kv_heads: usize = @intCast(self.config.n_kv_heads);
     const seq_len: usize = @intCast(self.config.seq_len);
     const kv_dim: usize = (dim * n_kv_heads) / n_heads;
+    const kv_mul: usize = n_heads / n_kv_heads; // Integer multiplier of the kv sharing in multiquery
+    const head_size: usize = dim / n_heads;
 
     // Copy the token embedding into x
     @memcpy(self.run_state.x, self.weights.token_embedding_table[token * dim .. token * dim + dim]);
@@ -208,14 +233,95 @@ pub fn forward(self: *@This(), token: u32, pos: u32) []f32 {
     for (0..n_layers) |l| {
         // Attention rmsnorm
         rmsnorm(self.run_state.xb, self.run_state.x, self.weights.rms_att_weight[l * dim .. l * dim + dim]);
+
         // Key and value point to the kv cache
         const loff: usize = l * seq_len * kv_dim;
         self.run_state.k = self.run_state.key_cache[loff + pos * kv_dim .. loff + pos * kv_dim + kv_dim];
         self.run_state.v = self.run_state.value_cache[loff + pos * kv_dim .. loff + pos * kv_dim + kv_dim];
+
         // qkv matmuls for this position
         matmul(self.run_state.q, self.run_state.xb, self.weights.wq[l * dim * dim .. l * dim * dim + (dim * dim)]);
         matmul(self.run_state.k, self.run_state.xb, self.weights.wk[l * dim * kv_dim .. l * dim * kv_dim + (dim * kv_dim)]);
         matmul(self.run_state.v, self.run_state.xb, self.weights.wv[l * dim * kv_dim .. l * dim * kv_dim + (dim * kv_dim)]);
+
+        // RoPE relative positional encoding: complex-valued rotate q and k in each head
+        var i: usize = 0;
+        while (i < dim) {
+            const head_dim = i % head_size;
+            const freq: f32 = 1.0 / std.math.pow(f32, 10000.0, @as(f32, @floatFromInt(head_dim)) / @as(f32, @floatFromInt(head_size)));
+            const val: f32 = @as(f32, @floatFromInt(pos)) * freq;
+            const fcr: f32 = @cos(val);
+            const fci: f32 = @sin(val);
+            const rotn: u2 = if (i < kv_dim) 2 else 1; // How many vectors? 2 = q & k, 1 = q only
+            for (0..rotn) |v| {
+                const vec: []f32 = if (v == 0) self.run_state.q else self.run_state.k; // the vector to rotate (query or key)
+                const v0: f32 = vec[i];
+                const v1: f32 = vec[i + 1];
+                vec[i] = v0 * fcr - v1 * fci;
+                vec[i + 1] = v0 * fci + v1 * fcr;
+            }
+            i += 2;
+        }
+
+        // Multihead attention. Iterate over all heads.
+        for (0..n_heads) |h| {
+            // Get the query vector for this head
+            const q: []f32 = self.run_state.q[h * head_size .. (h + 1) * head_size];
+            // Attention scores for this head
+            const att: []f32 = self.run_state.att[h * seq_len .. (h + 1) * seq_len];
+            // Iterate over all timesteps, including the current one
+            for (0..pos + 1) |t| {
+                // Get the key vector for this head and at this timestep
+                const koff: usize = loff + t * kv_dim + (h / kv_mul) * head_size;
+                const k: []f32 = self.run_state.key_cache[koff .. koff + head_size];
+                // Calculate the attention score as the dot product of q and k
+                var score: f32 = 0.0;
+                for (0..head_size) |j| {
+                    score += q[j] * k[j];
+                }
+                score /= @sqrt(@as(f32, @floatFromInt(head_size)));
+                // save the score to the attention buffer
+                att[t] = score;
+            }
+
+            // Softmax the scores to get attention weights, from 0..pos inclusively
+            softmax(att[0 .. pos + 1]);
+
+            // Weighted sum of the values, store back into xb
+            const xb: []f32 = self.run_state.xb[h * head_size .. (h + 1) * head_size];
+            @memset(xb, 0);
+            for (0..pos + 1) |t| {
+                // Get the value vector for this head and at this timestep
+                const voff: usize = loff + t * kv_dim + (h / kv_mul) * head_size;
+                const v: []f32 = self.run_state.value_cache[voff .. voff + head_size];
+                // Get the attention weight for this timestep
+                const a = att[t];
+                // Accumulate the weighted value into xb
+                for (0..head_size) |j| {
+                    xb[j] += a * v[j];
+                }
+            }
+        }
+
+        // Final matmul to get the output of the attention
+        matmul(self.run_state.xb2, self.run_state.xb, self.weights.wo[l * dim * dim .. (l + 1) * dim * dim]);
+
+        // residual connection back into x
+        for (0..dim) |j| {
+            self.run_state.x[j] += self.run_state.xb2[j];
+        }
+
+        // ffn rmsnorm
+        rmsnorm(self.run_state.xb, self.run_state.x, self.weights.rms_ffn_weight[l * dim .. (l + 1) * dim]);
+
+        // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+        // first calculate self.w1(x) and self.w3(x)
+        const hidden_dim: usize = @intCast(self.config.hidden_dim);
+        matmul(self.run_state.hb, self.run_state.xb, self.weights.w1[l * dim * hidden_dim .. (l + 1) * dim * hidden_dim]);
+        matmul(self.run_state.hb2, self.run_state.xb, self.weights.w3[l * dim * hidden_dim .. (l + 1) * dim * hidden_dim]);
+
+        // SwiGLU non-linearity
+
     }
 
     return &.{};
