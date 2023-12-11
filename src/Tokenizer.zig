@@ -10,7 +10,7 @@ vocab_scores: []f32,
 sorted_vocab: []TokenIndex,
 // TODO: Ensure this is necessary. Since the (i * 2)th element contains the character i, we might
 // be able to get away with computing this value on the fly.
-byte_pieces: [512]u8, // stores all single-byte strings
+byte_pieces: [256]u8, // stores all single-byte strings
 max_token_length: i32,
 
 fn sortToken(_: void, a: TokenIndex, b: TokenIndex) bool {
@@ -24,10 +24,9 @@ fn compareToken(_: void, key: []const u8, mid_item: TokenIndex) std.math.Order {
 pub fn init(tokenizer_path: []const u8, allocator: std.mem.Allocator, vocab_size: usize) !@This() {
     var vocab: [][]u8 = try allocator.alloc([]u8, vocab_size);
     var vocab_scores: []f32 = try allocator.alloc(f32, vocab_size);
-    var byte_pieces: [512]u8 = undefined;
+    var byte_pieces: [256]u8 = undefined;
     for (0..256) |i| {
-        byte_pieces[i * 2] = @intCast(i);
-        byte_pieces[i * 2 + 1] = 0;
+        byte_pieces[i] = @intCast(i);
     }
 
     // Read the tokenizer file
@@ -207,4 +206,29 @@ pub fn encode(
     }
 
     return n_tokens;
+}
+
+pub fn decode(
+    self: @This(),
+    prev_token: u32,
+    token: u32,
+) ![]const u8 {
+    var slice: []const u8 = self.vocab[token];
+    // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
+    if (prev_token == 1 and slice[0] == ' ') {
+        slice = slice[1..];
+    }
+    // Careful, some tokens designate raw bytes, and look like e.g. '<0x01>'.
+    // Parse this and convert and return the actual byte.
+    // Check if the string starts with "<0x" and ends with ">".
+    if (std.mem.startsWith(u8, slice, "<0x") and std.mem.endsWith(u8, slice, ">")) {
+        // Extract the hexadecimal part
+        const hexPart = slice[3 .. slice.len - 1];
+
+        // Parse the hexadecimal string
+        var byte_val: u8 = try std.fmt.parseInt(u8, hexPart, 16);
+        return self.byte_pieces[byte_val .. byte_val + 1];
+    }
+
+    return slice;
 }

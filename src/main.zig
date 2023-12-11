@@ -61,8 +61,16 @@ fn generate(
         }
 
         // Print the token as string, decode it with the Tokenizer object
-        break; // temp
+        const piece: []const u8 = try tokenizer.decode(token, next);
+        // piece might be a raw byte token, and we only want to print printable chars or whitespace
+        // because some of the other bytes can be various control codes, backspace, etc.
+        const is_printable_byte: bool = piece.len == 1 and piece[0] >= 32 and piece[0] <= 126 and piece[0] != ' ' and piece[0] != '\n' and piece[0] != '\r' and piece[0] != '\t';
+        if (piece.len > 1 or is_printable_byte) {
+            std.debug.print("{s}", .{piece});
+        }
+        token = next;
     }
+    std.debug.print("\n", .{});
 }
 
 pub fn main() !void {
