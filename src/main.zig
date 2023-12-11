@@ -24,13 +24,12 @@ fn errorUsage() !void {
 fn generate(
     transformer: *Transformer,
     tokenizer: Tokenizer,
-    sampler: Sampler,
+    sampler: *Sampler,
     prompt: []const u8,
     steps: u32,
     allocator: std.mem.Allocator,
 ) !void {
-    _ = sampler;
-    // encode the (string) prompt into tokens sequence
+    // Encode the (string) prompt into tokens sequence
     var prompt_token_buffer = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
     defer allocator.free(prompt_token_buffer);
 
@@ -40,12 +39,29 @@ fn generate(
 
     // Start the main loop
     var pos: u32 = 0;
+    var next: u32 = 0; // Will store the next token in the sequence
     var token: u32 = prompt_tokens[0];
     while (pos < steps) {
         // Forward the transformer to get logits for the next token.
         var logits = transformer.forward(token, pos);
-        std.debug.print("{any}\n", .{logits});
-        break; //temp
+
+        // Advance the state machine
+        if (pos < num_prompt_tokens - 1) {
+            // If we are still processing the input prompt, force the next prompt token
+            next = prompt_tokens[pos + 1];
+        } else {
+            // Otherwise sample the next token from the logits
+            next = sampler.sample(logits);
+        }
+        pos += 1;
+
+        // Data-dependent terminating condition: the BOS (=1) token delimits sequences
+        if (next == 1) {
+            break;
+        }
+
+        // Print the token as string, decode it with the Tokenizer object
+        break; // temp
     }
 }
 
@@ -70,8 +86,8 @@ pub fn main() !void {
     defer transformer.free(gpa);
     const tokenizer = try Tokenizer.init("tokenizer.bin", gpa, @intCast(transformer.config.vocab_size));
     defer tokenizer.free(gpa);
-    const sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), 1.0, 0.9, 0);
+    var sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), 1.0, 0.9, 0);
     defer sampler.free(gpa);
 
-    try generate(&transformer, tokenizer, sampler, "Once upon a time", 256, gpa);
+    try generate(&transformer, tokenizer, &sampler, "Once upon a time", 256, gpa);
 }
