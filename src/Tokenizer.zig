@@ -176,8 +176,9 @@ pub fn encode(
             // some gargabe at the end. We take a slice of it that contains only the two tokens.
             const combined_token: []const u8 = str_buffer[0 .. t0.len + t1.len];
 
-            const opt_id = std.sort.binarySearch(TokenIndex, combined_token, self.sorted_vocab, {}, compareToken);
-            if (opt_id) |id| {
+            const opt_idx = std.sort.binarySearch(TokenIndex, combined_token, self.sorted_vocab, {}, compareToken);
+            if (opt_idx) |idx| {
+                const id = self.sorted_vocab[idx].id;
                 if (best_score < self.vocab_scores[id]) {
                     best_score = self.vocab_scores[id];
                     opt_best_id = @intCast(id);

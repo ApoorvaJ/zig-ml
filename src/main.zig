@@ -110,7 +110,7 @@ test "tokenizer encode decode" {
     const tokenizer = try Tokenizer.init("tokenizer.bin", allocator, vocab_size);
     defer tokenizer.free(allocator);
 
-    const prompt: []const u8 = "H";
+    const prompt: []const u8 = "This is a test. ही एक चाचणी आहे. これはテストです. 😀";
     var prompt_token_buffer = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
     defer allocator.free(prompt_token_buffer);
 
