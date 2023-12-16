@@ -99,3 +99,39 @@ pub fn main() !void {
 
     try generate(&transformer, tokenizer, &sampler, "Once upon a time", 256, gpa);
 }
+
+// If we put a string into the tokenizer's encode function and then decode the
+// output, we should get the same string back. This tests that.
+test "tokenizer encode decode" {
+    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = general_purpose_allocator.allocator();
+    const vocab_size: usize = 32000;
+
+    const tokenizer = try Tokenizer.init("tokenizer.bin", allocator, vocab_size);
+    defer tokenizer.free(allocator);
+
+    const prompt: []const u8 = "H";
+    var prompt_token_buffer = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
+    defer allocator.free(prompt_token_buffer);
+
+    var num_prompt_tokens = try tokenizer.encode(prompt, prompt_token_buffer, allocator);
+    const prompt_tokens: []u32 = prompt_token_buffer[0..num_prompt_tokens];
+    try std.testing.expect(num_prompt_tokens >= 1);
+
+    // Ideally, the decoded buffer doesn't need to be any bigger than the prompt
+    // itself. But in the case where there's a bug in the system, it's nice to
+    // be able to see the full output, so we allocate a sufficiently large
+    // buffer.
+    var decoded_buffer = try allocator.alloc(u8, 100);
+    var write_idx: usize = 0;
+
+    for (0..prompt_tokens.len - 1) |i| {
+        const piece: []const u8 = try tokenizer.decode(prompt_tokens[i], prompt_tokens[i + 1]);
+        // Check that there is enough space in the buffer
+        try std.testing.expect(write_idx + piece.len <= decoded_buffer.len);
+        // Copy the piece into the buffer
+        @memcpy(decoded_buffer[write_idx .. write_idx + piece.len], piece);
+        write_idx += piece.len;
+    }
+    try std.testing.expectEqualStrings(prompt, decoded_buffer[0..write_idx]);
+}

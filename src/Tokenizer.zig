@@ -214,7 +214,7 @@ pub fn decode(
     token: u32,
 ) ![]const u8 {
     var slice: []const u8 = self.vocab[token];
-    // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
+    // following BOS (1) token, sentencepiece decoder strips any leading whitespace
     if (prev_token == 1 and slice[0] == ' ') {
         slice = slice[1..];
     }
