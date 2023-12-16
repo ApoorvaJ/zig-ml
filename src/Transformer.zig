@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const MappedFile = @import("MappedFile.zig");
+const Math = @import("Math.zig");
 
 const Config = struct {
     dim: i32, // transformer dimension
@@ -178,27 +179,6 @@ fn rmsnorm(o: []f32, x: []const f32, weight: []align(1) const f32) void {
     }
 }
 
-/// x is both the input and the output
-fn softmax(x: []f32) void {
-    // find max value (for numerical stability)
-    var max_val: f32 = x[0];
-    for (1..x.len) |i| {
-        if (x[i] > max_val) {
-            max_val = x[i];
-        }
-    }
-    // exp and sum
-    var sum: f32 = 0.0;
-    for (0..x.len) |i| {
-        x[i] = @exp(x[i] - max_val);
-        sum += x[i];
-    }
-    // normalize
-    for (0..x.len) |i| {
-        x[i] /= sum;
-    }
-}
-
 fn matmul(xout: []f32, x: []const f32, w: []align(1) const f32) void {
     // W (d,n) @ x (n,) -> xout (d,)
     const d = xout.len;
@@ -285,7 +265,7 @@ pub fn forward(self: *@This(), token: u32, pos: u32) []f32 {
             }
 
             // Softmax the scores to get attention weights, from 0..pos inclusively
-            softmax(att[0 .. pos + 1]);
+            Math.softmax(att[0 .. pos + 1]);
 
             // Weighted sum of the values, store back into xb
             const xb: []f32 = self.run_state.xb[h * head_size .. (h + 1) * head_size];

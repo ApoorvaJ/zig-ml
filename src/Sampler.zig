@@ -1,4 +1,5 @@
 const std = @import("std");
+const Math = @import("Math.zig");
 
 // Struct used when sorting probabilities during top-p sampling
 const ProbIndex = struct {
@@ -43,27 +44,6 @@ fn sample_argmax(probabilities: []const f32) u32 {
         }
     }
     return max_i;
-}
-
-// TODO: This funcion exists here and in Transformer.zig. Deduplicate.
-fn softmax(x: []f32) void {
-    // Find max value (for numerical stability)
-    var max_val: f32 = x[0];
-    for (1..x.len) |i| {
-        if (x[i] > max_val) {
-            max_val = x[i];
-        }
-    }
-    // Exp and sum
-    var sum: f32 = 0.0;
-    for (0..x.len) |i| {
-        x[i] = @exp(x[i] - max_val);
-        sum += x[i];
-    }
-    // Normalize
-    for (0..x.len) |i| {
-        x[i] /= sum;
-    }
 }
 
 fn random_u32(state: *u64) u32 {
@@ -151,7 +131,7 @@ pub fn sample(self: *@This(), logits: []f32) u32 {
             logits[q] /= self.temperature;
         }
         // Apply softmax to the logits to get the probabilities for next token
-        softmax(logits);
+        Math.softmax(logits);
         // Flip a (float) coin (this is our source of entropy for sampling)
         var coin: f32 = random_f32(&self.rng_state);
         // We sample from this distribution to get the next token
