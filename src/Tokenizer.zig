@@ -8,15 +8,13 @@ const TokenIndex = struct {
 vocab: [][]const u8,
 vocab_scores: []f32,
 sorted_vocab: []TokenIndex,
-// TODO: Ensure this is necessary. Since the (i * 2)th element contains the character i, we might
-// be able to get away with computing this value on the fly.
 byte_pieces: [256]u8, // stores all single-byte strings
 max_token_length: i32,
 
 fn sortToken(_: void, a: TokenIndex, b: TokenIndex) bool {
     return std.mem.order(u8, a.str, b.str).compare(std.math.CompareOperator.lt);
 }
-// fn(context:@TypeOf(context), key:@TypeOf(key), mid_item:T)math.Order
+
 fn compareToken(_: void, key: []const u8, mid_item: TokenIndex) std.math.Order {
     return std.mem.order(u8, key, mid_item.str);
 }
@@ -62,8 +60,6 @@ pub fn init(tokenizer_path: []const u8, allocator: std.mem.Allocator, vocab_size
         }
     }
     // Allocate and sort the vocab
-    // TODO: This can be pre-calculated and written to the tokenizer file before
-    // the program even runs.
     var sorted_vocab: []TokenIndex = try allocator.alloc(TokenIndex, vocab_size);
     for (0..vocab_size) |i| {
         sorted_vocab[i].str = vocab[i];
@@ -112,8 +108,6 @@ pub fn encode(
 
     // Add the dummy prefix token
     {
-        // TODO: This binary search takes a significant amount of time. It can be avoided by pre-storing
-        // the index of this token.
         const key: []const u8 = " ";
         const opt_idx: ?usize = std.sort.binarySearch(TokenIndex, key, self.sorted_vocab, {}, compareToken);
         std.debug.assert(opt_idx != null);
