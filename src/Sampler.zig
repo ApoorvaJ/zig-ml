@@ -51,7 +51,8 @@ fn random_u32(state: *u64) u32 {
     state.* ^= state.* >> 12;
     state.* ^= state.* << 25;
     state.* ^= state.* >> 27;
-    return @intCast((state.* * 0x2545F4914F6CDD1D) >> 32);
+    const product = @mulWithOverflow(state.*, 0x2545F4914F6CDD1D)[0];
+    return @intCast(product >> 32);
 }
 
 /// random float32 in [0,1)
