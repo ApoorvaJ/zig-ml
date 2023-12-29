@@ -86,6 +86,8 @@ pub fn main() !void {
     var temperature: f32 = 1.0;
     var topp: f32 = 0.9;
     var rng_seed: u64 = 0;
+    var steps: u32 = 256;
+    var prompt: []const u8 = "Once upon a time";
     // Parse command line arguments
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
@@ -132,6 +134,16 @@ pub fn main() !void {
                 try stderr.print("Parsing error. Pass in a valid random seed as follows `-s <unsigned integer>`.\n\n", .{});
                 std.os.exit(1);
             }
+        } else if (args[i][1] == 'n') {
+            if (std.fmt.parseInt(u32, args[i + 1], 10)) |number| {
+                steps = number;
+            } else |_| {
+                const stderr = std.io.getStdErr().writer();
+                try stderr.print("Parsing error. Pass in a valid number of steps as follows `-n <unsigned integer>`.\n\n", .{});
+                std.os.exit(1);
+            }
+        } else if (args[i][1] == 'i') {
+            prompt = args[i + 1];
         }
         i += 2;
     }
@@ -145,7 +157,7 @@ pub fn main() !void {
     var sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), temperature, topp, rng_seed);
     defer sampler.free(gpa);
 
-    try generate(&transformer, tokenizer, &sampler, "Once upon a time", 256, gpa);
+    try generate(&transformer, tokenizer, &sampler, prompt, steps, gpa);
 }
 
 // If we put a string into the tokenizer's encode function and then decode the
