@@ -7,8 +7,9 @@ fn errorUsage() !void {
     const stderr = std.io.getStdErr().writer();
     const usage =
         \\Usage:   run <checkpoint> [options]
-        \\Example: run model.bin -n 256 -i \"Once upon a time\"
-        \\Options:\n");
+        \\Example: run model.bin -n 256 -i "Once upon a time"
+        \\
+        \\Options:
         \\  -t <float>  temperature in [0,inf], default 1.0
         \\  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9
         \\  -s <int>    random seed, default time(NULL)
@@ -17,8 +18,11 @@ fn errorUsage() !void {
         \\  -z <string> optional path to custom tokenizer
         \\  -m <string> mode: generate|chat, default: generate
         \\  -y <string> (optional) system prompt in chat mode
+        \\
+        \\
     ;
     try stderr.print(usage, .{});
+    std.os.exit(1);
 }
 
 fn generate(
@@ -78,15 +82,59 @@ pub fn main() !void {
     const gpa = general_purpose_allocator.allocator();
 
     var checkpoint_path: ?[]const u8 = null;
+    // 0.0 = greedy deterministic. 1.0 = original. don't set higher
+    var temperature: f32 = 1.0;
+    var topp: f32 = 0.9;
+    var rng_seed: u64 = 0;
     // Parse command line arguments
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
     if (args.len < 2) {
         try errorUsage();
-        std.os.exit(1);
     }
     checkpoint_path = args[1];
+    var i: usize = 2;
+    while (i < args.len) {
+        if (i + 1 >= args.len) {
+            // must have arg after flag
+            try errorUsage();
+        }
+        if (args[i][0] != '-') {
+            // must start with dash
+            try errorUsage();
+        }
+        if (args[i].len != 2) {
+            // must be -x (one dash, one letter)
+            try errorUsage();
+        }
+        if (args[i][1] == 't') {
+            if (std.fmt.parseFloat(f32, args[i + 1])) |number| {
+                temperature = number;
+            } else |_| {
+                const stderr = std.io.getStdErr().writer();
+                try stderr.print("Parsing error. Pass in a valid temperature as follows `-t <float>`.\n\n", .{});
+                std.os.exit(1);
+            }
+        } else if (args[i][1] == 'p') {
+            if (std.fmt.parseFloat(f32, args[i + 1])) |number| {
+                topp = number;
+            } else |_| {
+                const stderr = std.io.getStdErr().writer();
+                try stderr.print("Parsing error. Pass in a valid top-p as follows `-p <float>`.\n\n", .{});
+                std.os.exit(1);
+            }
+        } else if (args[i][1] == 's') {
+            if (std.fmt.parseInt(u64, args[i + 1], 10)) |number| {
+                rng_seed = number;
+            } else |_| {
+                const stderr = std.io.getStdErr().writer();
+                try stderr.print("Parsing error. Pass in a valid random seed as follows `-s <unsigned integer>`.\n\n", .{});
+                std.os.exit(1);
+            }
+        }
+        i += 2;
+    }
 
     // TODO: more command line argument validation
 
@@ -94,7 +142,7 @@ pub fn main() !void {
     defer transformer.free(gpa);
     const tokenizer = try Tokenizer.init("tokenizer.bin", gpa, @intCast(transformer.config.vocab_size));
     defer tokenizer.free(gpa);
-    var sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), 1.0, 0.9, 0);
+    var sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), temperature, topp, rng_seed);
     defer sampler.free(gpa);
 
     try generate(&transformer, tokenizer, &sampler, "Once upon a time", 256, gpa);
