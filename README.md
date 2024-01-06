@@ -1,6 +1,6 @@
 # ⚡ zig-ml
 
-Large Language Model inference written in the [Zig](https://ziglang.org/).
+Large Language Model inference written in [Zig](https://ziglang.org/).
 
 I started this project to understand how AI inference works, without using any high-level libraries. I also want learn how to optimize these workloads and run them on modest hardware.
 
