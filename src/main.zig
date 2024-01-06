@@ -15,9 +15,9 @@ fn errorUsage() !void {
         \\  -s <int>    random seed, default time(NULL)
         \\  -n <int>    number of steps to run for, default 256. 0 = max_seq_len
         \\  -i <string> input prompt
-        \\  -z <string> optional path to custom tokenizer
-        \\  -m <string> mode: generate|chat, default: generate
-        \\  -y <string> (optional) system prompt in chat mode
+        // \\  -z <string> optional path to custom tokenizer
+        // \\  -m <string> mode: generate|chat, default: generate
+        // \\  -y <string> (optional) system prompt in chat mode
         \\
         \\
     ;
