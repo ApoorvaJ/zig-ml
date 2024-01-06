@@ -16,7 +16,17 @@ I started this project to understand how AI inference works, without using any h
 You should get an output that looks something like this:
 
 ```
-There was a dog called Milo. Milo was a very happy dog. He loved to play and run around. One day, Milo was playing in the park when he saw a big, scary cat. The cat was very mean and it made Milo feel very scared.Milo wanted to run away, but he was too scared. He tried to run away, but the cat was too fast. The cat chased Milo and he ran as fast as he could.Milo ran and ran until he was very tired. He stopped and looked around. He saw a big tree and he knew he was safe. He looked up and saw the cat in the tree.Milo was very scared, but he was also very brave. He decided to try and get the cat down. He jumped up and barked at the cat. The cat was so scared that it ran away.Milo was very happy. He had been so brave and he had been so brave. He ran back home and he was very happy. He had been very brave and he was very proud of himself.
+There was a dog called Milo. Milo was a very happy dog. He loved to play and run
+around. One day, Milo was playing in the park when he saw a big, scary cat.
+The cat was very mean and it made Milo feel very scared.Milo wanted to run away,
+but he was too scared. He tried to run away, but the cat was too fast. The cat
+chased Milo and he ran as fast as he could.Milo ran and ran until he was very
+tired. He stopped and looked around. He saw a big tree and he knew he was safe.
+He looked up and saw the cat in the tree.Milo was very scared, but he was also
+very brave. He decided to try and get the cat down. He jumped up and barked at
+the cat. The cat was so scared that it ran away.Milo was very happy. He had been
+so brave and he had been so brave. He ran back home and he was very happy. He
+had been very brave and he was very proud of himself.
 ```
 
 Not exactly Shakespeare, but not bad for a relatively small model.
