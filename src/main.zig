@@ -25,6 +25,7 @@ fn errorUsage() !void {
     std.os.exit(1);
 }
 
+/// Returns the number of tokens generated
 fn generate(
     transformer: *Transformer,
     tokenizer: Tokenizer,
@@ -32,7 +33,7 @@ fn generate(
     prompt: []const u8,
     steps: u32,
     allocator: std.mem.Allocator,
-) !void {
+) !u32 {
     // Encode the (string) prompt into tokens sequence
     var prompt_token_buffer = try allocator.alloc(u32, prompt.len + 3); // +3 for '\0', ?BOS, ?EOS
     defer allocator.free(prompt_token_buffer);
@@ -75,11 +76,12 @@ fn generate(
         token = next;
     }
     std.debug.print("\n", .{});
+    return pos;
 }
 
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    const gpa = general_purpose_allocator.allocator();
+    const allocator = general_purpose_allocator.allocator();
 
     var checkpoint_path: ?[]const u8 = null;
     // 0.0 = greedy deterministic. 1.0 = original. don't set higher
@@ -89,8 +91,8 @@ pub fn main() !void {
     var steps: u32 = 256;
     var prompt: []const u8 = "Once upon a time";
     // Parse command line arguments
-    const args = try std.process.argsAlloc(gpa);
-    defer std.process.argsFree(gpa, args);
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
         try errorUsage();
@@ -150,14 +152,30 @@ pub fn main() !void {
 
     // TODO: more command line argument validation
 
-    var transformer = try Transformer.init(checkpoint_path.?, gpa);
-    defer transformer.free(gpa);
-    const tokenizer = try Tokenizer.init("tokenizer.bin", gpa, @intCast(transformer.config.vocab_size));
-    defer tokenizer.free(gpa);
-    var sampler = try Sampler.init(gpa, @intCast(transformer.config.vocab_size), temperature, topp, rng_seed);
-    defer sampler.free(gpa);
+    var start_time = std.time.microTimestamp();
+    var transformer = try Transformer.init(checkpoint_path.?, allocator);
+    defer transformer.free(allocator);
+    const tokenizer = try Tokenizer.init("tokenizer.bin", allocator, @intCast(transformer.config.vocab_size));
+    defer tokenizer.free(allocator);
+    var sampler = try Sampler.init(allocator, @intCast(transformer.config.vocab_size), temperature, topp, rng_seed);
+    defer sampler.free(allocator);
 
-    try generate(&transformer, tokenizer, &sampler, prompt, steps, gpa);
+    const num_tokens_generated = try generate(
+        &transformer,
+        tokenizer,
+        &sampler,
+        prompt,
+        steps,
+        allocator,
+    );
+
+    // Print perf stats
+    {
+        var end_time = std.time.microTimestamp();
+        const sec: f32 = @as(f32, @floatFromInt(end_time - start_time)) / std.time.us_per_s;
+        const tokens_per_sec: f32 = @as(f32, @floatFromInt(num_tokens_generated)) / sec;
+        std.debug.print("{d} tokens/sec\n", .{tokens_per_sec});
+    }
 }
 
 // If we put a string into the tokenizer's encode function and then decode the
